@@ -15,6 +15,7 @@ import {
   DNSResolver,
   DnsCache,
 } from "../plugins/dns-op/dns-op.js";
+import { LogPusher } from "../plugins/observability/log-pusher.js";
 import * as dnsutil from "../commons/dnsutil.js";
 import * as system from "../system.js";
 import * as util from "../commons/util.js";
@@ -28,34 +29,22 @@ let latestHeartbeat = 0;
 let latestWaitMs = 0;
 
 export const services = {
-  /**
-   * @type {Boolean} ready
-   */
+  /** @type {Boolean} ready */
   ready: false,
-  /**
-   * @type {?BlocklistWrapper} blocklistWrapper
-   */
+  /** @type {BlocklistWrapper?} blocklistWrapper */
   blocklistWrapper: null,
-  /**
-   * @type {?UserOp} userOp
-   */
+  /** @type {UserOp?} userOp */
   userOp: null,
-  /**
-   * @type {?DNSPrefilter} prefilter
-   */
+  /** @type {DNSPrefilter?} prefilter */
   prefilter: null,
-  /**
-   * @type {?CommandControl} commandControl
-   */
+  /** @type {CommandControl?} commandControl */
   commandControl: null,
-  /**
-   * @type {?DNSCacheResponder} dnsCacheHandler
-   */
+  /** @type {DNSCacheResponder?} dnsCacheHandler */
   dnsCacheHandler: null,
-  /**
-   * @type {?DNSResolver} dnsResolver
-   */
+  /** @type {DNSResolver?} dnsResolver */
   dnsResolver: null,
+  /** @type {LogPusher?} logPusher */
+  logPusher: null,
 };
 
 ((main) => {
@@ -72,13 +61,15 @@ async function systemReady() {
 
   const bw = new BlocklistWrapper();
   const cache = new DnsCache(dnsutil.cacheSize());
+  const lp = new LogPusher();
 
   services.blocklistWrapper = bw;
+  services.logPusher = lp;
   services.userOp = new UserOp();
   services.prefilter = new DNSPrefilter();
   services.dnsCacheHandler = new DNSCacheResponder(bw, cache);
-  services.commandControl = new CommandControl(bw);
   services.dnsResolver = new DNSResolver(bw, cache);
+  services.commandControl = new CommandControl(bw, services.dnsResolver, lp);
 
   services.ready = true;
 
@@ -87,9 +78,9 @@ async function systemReady() {
   system.pub("steady");
 }
 
-function systemStop() {
+async function systemStop() {
   log.d("svc stop, signal close resolver");
-  services.dnsResolver.close();
+  if (services.ready) await services.dnsResolver.close();
 }
 
 function stopProc() {
@@ -105,6 +96,8 @@ export function stopAfter(ms = 0) {
   if (ms < 0) {
     log.w("invalid stopAfter", ms);
     return;
+  } else {
+    log.d("stopAfter", ms);
   }
   const now = Date.now();
   // 33% of the upcoming wait-time
@@ -121,7 +114,11 @@ export function stopAfter(ms = 0) {
     return;
   }
   clearEndTimer();
-  endtimer = util.timeout(ms, stopProc);
+  if (ms <= 0) {
+    stopProc();
+  } else {
+    endtimer = util.timeout(ms, stopProc);
+  }
   log.d("h?", toohigh, "r?", recent, "waitMs", latestWaitMs, "extend ttl", ms);
   latestWaitMs = ms;
   latestHeartbeat = now;

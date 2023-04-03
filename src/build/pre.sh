@@ -4,30 +4,61 @@ wk="$1"
 mm="$2"
 yyyy="$3"
 
+# stackoverflow.com/a/24753942
+hasfwslash() {
+    case "$1" in
+    */*) echo yes ;;
+    *       ) echo no ;;
+    esac
+}
+
 burl="https://cfstore.rethinkdns.com/blocklists"
 dir="bc"
 codec="u6"
 f="basicconfig.json"
 f2="filetag.json"
-cwd=`pwd`
+cwd=$(pwd)
 # exec this script from npm or project root
 out="./src/${codec}-${f}"
 out2="./src/${codec}-${f2}"
+name=$(uname)
 
 # timestamp: 1667519318.799 stackoverflow.com/a/69400542
-# nowms =`date --utc +"%s.%3N"`
-now=`date --utc +"%s"`
+# nowms =`date -u +"%s.%3N"`
+if [ "$name" = "Darwin" ]
+then
+    now=$(date -u +"%s")
+else
+    now=$(date --utc +"%s")
+fi
+
 
 # date from timestamp: stackoverflow.com/a/16311821
-day=`date -d @$now "+%d"`
+if [ "$name" = "Darwin" ]
+then
+    day=$(date -r "$now" "+%d")
+else
+    day=$(date -d "@$now" "+%d")
+fi
 # ex: conv 08 => 8 stackoverflow.com/a/12821845
 day=${day#0}
 # week; ceil: stackoverflow.com/a/12536521
 wkdef=$(((day + 7 -1) / 7))
 # year
-yyyydef=`date -d @$now "+%Y"`
+if [ "$name" = "Darwin" ]
+then
+    yyyydef=$(date -r "$now" "+%Y")
+else
+    yyyydef=$(date -d "@$now" "+%Y")
+fi
 # month
-mmdef=`date -d @$now "+%m"`
+if [ "$name" = "Darwin" ]
+then
+    mmdef=$(date -r "$now" "+%m")
+else
+    mmdef=$(date -d "@$now" "+%m")
+fi
+mmdef=${mmdef#0}
 
 # defaults: stackoverflow.com/a/28085062
 : "${wk:=$wkdef}" "${mm:=$mmdef}" "${yyyy:=$yyyydef}"
@@ -35,7 +66,7 @@ mmdef=`date -d @$now "+%m"`
 # stackoverflow.com/a/1445507
 max=4
 # 0..4 (5 loops)
-for i in `seq 0 $max`
+for i in $(seq 0 $max)
 do
     echo "x=== pre.sh: $i try $yyyy/$mm-$wk at $now from $cwd"
 
@@ -49,8 +80,12 @@ do
         wcode=$?
 
         if [ $wcode -eq 0 ]; then
-            # baretimestamp=$(cut -d"," -f8 "$out" | cut -d":" -f2 | grep -o -E '[0-9]+' | tail -n1)
-            fulltimestamp=$(cut -d"," -f8 "$out" | cut -d":" -f2 | tr -dc '0-9/')
+            # baretimestamp=$(cut -d"," -f9 "$out" | cut -d":" -f2 | grep -o -E '[0-9]+' | tail -n1)
+            fulltimestamp=$(cut -d"," -f9 "$out" | cut -d":" -f2 | tr -dc '0-9/')
+            if [ "$(hasfwslash "$fulltimestamp")" = "no" ]; then
+                echo "==x= pre.sh: $i filetag at f8"
+                fulltimestamp=$(cut -d"," -f8 "$out" | cut -d":" -f2 | tr -dc '0-9/')
+            fi
             echo "==x= pre.sh: $i ok $wcode; filetag? ${fulltimestamp}"
             wget -q "${burl}/${fulltimestamp}/${codec}/${f2}" -O "${out2}"
             wcode2=$?
@@ -59,6 +94,7 @@ do
               exit 0
             else
               echo "===x pre.sh: $i not ok $wcode2"
+              exit 1
               rm ${out}
               rm ${out2}
             fi
